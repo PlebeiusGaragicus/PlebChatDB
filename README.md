@@ -1,6 +1,26 @@
 # PlebChatDB
 
 
+
+
+```sh
+streamlit run frontend/app.py --server.port=5252
+
+uvicorn server.app:app --reload --port 5101
+```
+
+
+
+
+
+
+---
+
+
+
+
+
+
 ```sh
 streamlit run frontend/app.py
 ...

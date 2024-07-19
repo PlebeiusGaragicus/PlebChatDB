@@ -37,7 +37,7 @@ app = FastAPI(lifespan=lifespan)
 # Optional CORS middleware if you need to allow cross-origin requests
 origins = [
     "http://localhost",
-    "http://localhost:8501",
+    "http://localhost:5522",
     # Add the origins you need
 ]
 
@@ -83,8 +83,8 @@ async def deduct_balance(username: str, transaction_request: TransactionRequest)
         raise HTTPException(status_code=404, detail="User not found")
     
     new_balance = user["balance"] + transaction_request.amount
-    if new_balance < 0:
-        raise HTTPException(status_code=400, detail="Insufficient funds")
+    # if new_balance < 0:
+    #     raise HTTPException(status_code=400, detail="Insufficient funds")
 
     user["balance"] = new_balance
     await user_collection.update_one({"username": username}, {"$set": {"balance": new_balance}})

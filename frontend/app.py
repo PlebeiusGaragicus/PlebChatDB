@@ -1,13 +1,14 @@
 import streamlit as st
 import requests
 
-API_URL = "http://localhost:8000"
+DATABASE_API_PORT = 5101
+DATABASE_API_URL = f"http://localhost"
 
 st.title("Admin Dashboard")
 
 # Function to fetch all users
 def get_all_users():
-    response = requests.get(f"{API_URL}/users/")
+    response = requests.get(f"{DATABASE_API_URL}:{DATABASE_API_PORT}/users/")
     if response.status_code == 200:
         return response.json()
     else:
@@ -19,7 +20,7 @@ st.header("Create User")
 username = st.text_input("Username")
 balance = st.number_input("Initial Balance", min_value=0.0, format="%.2f")
 if st.button("Create User"):
-    response = requests.post(f"{API_URL}/users/", json={"username": username, "balance": balance})
+    response = requests.post(f"{DATABASE_API_URL}:{DATABASE_API_PORT}/users/", json={"username": username, "balance": balance})
     if response.status_code == 200:
         st.success(f"User {username} created successfully!")
     else:
@@ -37,7 +38,7 @@ if users:
 st.header("Get User Balance")
 get_username = st.selectbox("Select User", user_list) if users else ""
 if get_username and st.button("Get Balance"):
-    response = requests.get(f"{API_URL}/users/{get_username}/balance/")
+    response = requests.get(f"{DATABASE_API_URL}:{DATABASE_API_PORT}/users/{get_username}/balance/")
     if response.status_code == 200:
         user_data = response.json()
         st.info(f"User: {user_data['username']}, Balance: {user_data['balance']}")
@@ -51,7 +52,7 @@ deduct_amount = st.number_input("Amount to Deduct", min_value=0.0, format="%.2f"
 chat_id = st.text_input("Chat ID")
 if deduct_username and st.button("Deduct Balance"):
     response = requests.put(
-        f"{API_URL}/users/{deduct_username}/balance/deduct",
+        f"{DATABASE_API_URL}:{DATABASE_API_PORT}/users/{deduct_username}/balance/deduct",
         json={"chat_id": chat_id, "amount": -deduct_amount}
     )
     if response.status_code == 200:
@@ -64,7 +65,7 @@ if deduct_username and st.button("Deduct Balance"):
 st.header("View User Transactions")
 transact_username = st.selectbox("Select User to View Transactions", user_list) if users else ""
 if transact_username and st.button("Get Transactions"):
-    response = requests.get(f"{API_URL}/users/{transact_username}/transactions/")
+    response = requests.get(f"{DATABASE_API_URL}:{DATABASE_API_PORT}/users/{transact_username}/transactions/")
     print(response)
     try:
         response.raise_for_status()
