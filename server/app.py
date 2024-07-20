@@ -103,3 +103,26 @@ async def get_transactions(username: str):
     # Convert MongoDB transactions to JSON-compatible format
     transactions = [transaction_helper(transaction) for transaction in transactions]
     return transactions
+
+
+
+
+############################################################
+#TODO: TESTING ONLY!
+############################################################
+
+class IncreaseBalanceRequest(BaseModel):
+    amount: float
+
+@app.put("/users/{username}/balance/increase")
+async def increase_balance(username: str, request: IncreaseBalanceRequest):
+    user_collection = db.db.get_collection("users")
+    user = await user_collection.find_one({"username": username})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    new_balance = user["balance"] + request.amount
+
+    await user_collection.update_one({"username": username}, {"$set": {"balance": new_balance}})
+    
+    return {"username": username, "new_balance": new_balance}
