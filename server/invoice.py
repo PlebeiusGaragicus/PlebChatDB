@@ -53,29 +53,31 @@ def check_for_payment(invoice):
 
 
 
+TOKENS_PER_SAT = 10
 
-
-def create_invoice(amount: int = 100, ln_address: str = "turkeybiscuit@getalby.com"):
+def create_invoice(amount: int = 100, payee_address: str = "turkeybiscuit@getalby.com"):
     """
     Create a lightning invoice.
     
     Parameters:
     - amount: Amount in satoshis.
-    - ln_address: The lightning network address to receive the payment.
+    - payee_address: The lightning address to receive the payment.
     
     Returns:
     - Invoice details as a dictionary if successful.
     - Error message if the request fails.
     """
+    # ln_address = "turkeybiscuit@getalby.com"
     url = "https://api.getalby.com/lnurl/generate-invoice"
     params = {
-        "ln": ln_address,
+        "ln": payee_address,
         "amount": amount * 1000,  # in millisats
-        "comment": f"Purchased {amount * 30} PlebChat tokens 🗣️🤖💬"
+        "comment": f"Purchased {amount * TOKENS_PER_SAT} tokens"
     }
 
     response = requests.get(url, params=params)
 
+    print(f"Creating invoice for {amount} sats")
     if response.status_code == 200:
         # Successfully created the invoice
         invoice_details = response.json()
@@ -85,6 +87,7 @@ def create_invoice(amount: int = 100, ln_address: str = "turkeybiscuit@getalby.c
         return invoice_details
     else:
         # Failed to create the invoice
+        print(response)
         error_message = f"Failed to create invoice: {response.status_code} {response.text}"
         print(error_message)
         return {"error": error_message}

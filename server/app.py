@@ -78,6 +78,7 @@ async def get_invoice(request: UsernameRequest):
     user_collection = db.db.get_collection("users")
 
     pending_invoice = await invoices_collection.find_one({"username": username, "status": "pending"})
+    print("Pending invoice:", pending_invoice)
 
     if pending_invoice:
         is_paid = invoice_utils.check_for_payment(pending_invoice)
@@ -98,7 +99,8 @@ async def get_invoice(request: UsernameRequest):
         else:
             return invoice_helper(pending_invoice)
 
-    new_invoice_details = invoice_utils.create_invoice(amount=50, ln_address=username)
+    print("No pending invoice found")
+    new_invoice_details = invoice_utils.create_invoice(amount=100)
     if 'error' in new_invoice_details:
         raise HTTPException(status_code=500, detail=new_invoice_details['error'])
     
@@ -109,6 +111,10 @@ async def get_invoice(request: UsernameRequest):
     new_invoice_dict['_id'] = new_invoice_id
 
     return invoice_helper(new_invoice_dict)
+
+
+
+
 
 @app.put("/tx/")
 async def deduct_balance(transaction_request: TransactionRequest):
@@ -222,3 +228,8 @@ def read_routes():
         if hasattr(route, "path"):
             routes.append(route.path)
     return {"routes": routes}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5101)
