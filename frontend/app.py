@@ -5,9 +5,11 @@ import streamlit as st
 DATABASE_API_PORT = 5101
 DATABASE_API_URL = f"http://localhost:{DATABASE_API_PORT}"
 
+
+
 # Helper function to handle increase user balance
 def increase_user_balance(username, amount):
-    response = requests.put(f"{DATABASE_API_URL}/users/balance/increase", json={"username": username, "amount": amount})
+    response = requests.put(f"{DATABASE_API_URL}/admin/users/balance/increase", json={"username": username, "amount": amount})
     if response.status_code == 200:
         return response.json()
     else:
@@ -73,58 +75,104 @@ if users:
             st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
 
 # Deduct balance using select box
-st.header("Deduct User Balance")
+st.header("Set User Balance")
 if users:
-    deduct_username = st.selectbox("Select User to Deduct From", user_list)
-    deduct_amount = st.number_input("Amount to Deduct", min_value=0)
-    chat_id = st.text_input("Chat ID")
-    if st.button("Deduct Balance"):
+    deduct_username = st.selectbox("Set a user to adjust", user_list)
+    new_balance = st.number_input("New Balance", min_value=0)
+    if st.button("Set Balance"):
         response = requests.put(
-            f"{DATABASE_API_URL}/tx/",
-            json={"username": deduct_username, "chat_id": chat_id, "amount": -deduct_amount}
+            f"{DATABASE_API_URL}/admin/balance/",
+            json={"username": deduct_username, "new_balance": new_balance}
         )
         if response.status_code == 200:
             user_data = response.json()
-            st.info(f"New Balance for {user_data['username']}: {user_data['balance']}")
+            st.info(f"New Balance for {user_data['username']}: {user_data['new_balance']}")
         else:
             st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
 
-# Increase user balance using select box
-st.header("Increase User Balance")
-if users:
-    increase_user = st.selectbox("Select User to Increase Balance", user_list)
-    increase_amount = st.number_input("Amount to Increase", min_value=0)
 
-    if st.button("Increase Balance"):
-        result = increase_user_balance(increase_user, increase_amount)
-        if result:
-            st.info(f"New Balance for {result['username']}: {result['new_balance']}")
 
-# View invoices using select box
-st.header("View User Invoices")
-if users:
-    invoice_username = st.selectbox("Select User to View Invoices", user_list)
-    if st.button("Get Invoices"):
-        response = requests.post(f"{DATABASE_API_URL}/invoices/", json={"username": invoice_username})
-        if response.status_code == 200:
-            invoices = response.json()
-            st.write(invoices)
-        else:
-            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
 
-# View transactions using select box
-st.header("View User Transactions")
-if users:
-    transact_username = st.selectbox("Select User to View Transactions", user_list)
-    if st.button("Get Transactions"):
-        response = requests.post(f"{DATABASE_API_URL}/usage/", json={"username": transact_username})
-        try:
-            response.raise_for_status()
-            transactions = response.json()
-            st.write(transactions)
-        except requests.exceptions.HTTPError:
-            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
-        except requests.exceptions.RequestException as e:
-            st.error(f"Request failed: {e}")
-        except ValueError:
-            st.error("Failed to decode JSON response")
+
+
+
+# Function to fetch all invoices
+def get_all_invoices():
+    response = requests.get(f"{DATABASE_API_URL}/admin/invoices/")
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error("Failed to fetch invoices.")
+        return []
+
+# Create a new invoice
+st.header("Create Invoice")
+invoice_username = st.text_input("Invoice Username")
+invoice_pr = st.text_input("Invoice PR")
+invoice_amount = st.number_input("Invoice Amount", min_value=0)
+if st.button("Create Invoice"):
+    invoice_data = {
+        "username": invoice_username,
+        "pr": invoice_pr,
+        "routes": [],
+        "status": "pending",  # or 'paid', 'archived'
+        "successAction": {
+            "message": "Thanks, sats received!",
+            "tag": "message"
+        },
+        "verify": "https://getalby.com/lnurlp/turkeybiscuit/verify/xiNZ8HdmD3WzQJWMrhN8yDa7",
+        "amount": invoice_amount,
+        "issued_at": None  # this will be set by the server if left None
+    }
+    response = requests.post(f"{DATABASE_API_URL}/admin/invoices/", json=invoice_data)
+    if response.status_code == 200:
+        st.success("Invoice created successfully!")
+    else:
+        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+
+# # Display all invoices
+# st.header("All Invoices")
+# invoices = get_all_invoices()
+# if invoices:
+#     st.write(invoices)
+#     invoice_dict = {invoice["id"]: invoice for invoice in invoices}  # Updated the key to "_id"
+#     invoice_list = list(invoice_dict.keys())
+#     st.write(invoice_dict)
+
+#     st.header("Delete Invoice")
+#     del_invoice_id = st.selectbox("Select Invoice to Delete", invoice_list)
+#     if st.button("Delete Invoice"):
+#         response = requests.delete(f"{DATABASE_API_URL}/admin/invoice/{del_invoice_id}/")
+#         if response.status_code == 200:
+#             st.success(f"Invoice {del_invoice_id} deleted successfully!")
+#         else:
+#             st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+# else:
+#     st.warning("No invoices found.")
+# Display invoices based on selected user
+st.header("All Invoices")
+invoices = get_all_invoices()
+if invoices:
+    st.subheader("Select User to View Invoices")
+    selected_user = st.selectbox("Select User to view invoices", user_list)
+    
+    user_invoices = [invoice for invoice in invoices if invoice["username"] == selected_user]
+    
+    if user_invoices:
+        # st.write(user_invoices)
+        invoice_dict = {invoice["id"]: invoice for invoice in user_invoices}
+        invoice_list = list(invoice_dict.keys())
+        st.write(invoice_dict)
+
+        st.header("Delete Invoice")
+        del_invoice_id = st.selectbox("Select Invoice to Delete", invoice_list)
+        if st.button("Delete Invoice"):
+            response = requests.delete(f"{DATABASE_API_URL}/admin/invoice/{del_invoice_id}/")
+            if response.status_code == 200:
+                st.success(f"Invoice {del_invoice_id} deleted successfully!")
+            else:
+                st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+    else:
+        st.info("No invoices found for the selected user.")
+else:
+    st.warning("No invoices found.")

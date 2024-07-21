@@ -27,3 +27,10 @@ async def close_mongo_connection():
     logger.info("Closing MongoDB connection...")
     db.client.close()
     logger.info("Closed MongoDB connection")
+
+# mongosh
+# show databases
+# use user_balance
+# show collections
+# db.users.find().pretty()
+# db.users.drop()

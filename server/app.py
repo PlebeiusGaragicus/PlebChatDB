@@ -36,15 +36,17 @@ logging.config.dictConfig(logging_config)
 # Get the root logger
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, status
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from bson import ObjectId
 from typing import List
 
 from server.models import User, Transaction, Invoice, UsernameRequest
 from server.database import db, connect_to_mongo, close_mongo_connection
 import server.invoice as invoice_utils
+
 
 
 class UserRequest(BaseModel):
@@ -56,9 +58,9 @@ class TransactionRequest(BaseModel):
     chat_id: str
     amount: int
 
-class IncreaseBalanceRequest(BaseModel):
+class BalanceRequest(BaseModel):
     username: str
-    amount: int
+    new_balance: int
 
 def transaction_helper(transaction) -> dict:
     return {
@@ -73,7 +75,11 @@ def invoice_helper(invoice) -> dict:
     return {
         "id": str(invoice["_id"]),
         "username": invoice["username"],
+        "pr": invoice["pr"],
+        "routes": invoice["routes"],
         "status": invoice["status"],
+        "successAction": invoice["successAction"],
+        "verify": invoice["verify"],
         "amount": invoice["amount"],
         "issued_at": invoice["issued_at"]
     }
@@ -123,46 +129,72 @@ async def get_balance(request: Request):
         raise HTTPException(status_code=404, detail="User not found")
     return {"username": username, "balance": user["balance"]}
 
+
 @app.get("/invoice/")
 async def get_invoice(request: UsernameRequest):
     logger.debug("get_invoice endpoint called")
     logger.debug(f"Request: {request}")
+
     username = request.username
     invoices_collection = db.db.get_collection("invoices")
     user_collection = db.db.get_collection("users")
 
-    pending_invoice = await invoices_collection.find_one({"username": username, "status": "pending"})
-    print("Pending invoice:", pending_invoice)
-
+    # Fetch Pending Invoice
+    pending_invoice = await invoices_collection.find_one(
+        {"username": username, "status": "pending"}
+    )
     if pending_invoice:
         is_paid = invoice_utils.check_for_payment(pending_invoice)
         if is_paid:
             user = await user_collection.find_one({"username": username})
             if not user:
-                raise HTTPException(status_code=404, detail="User not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+                )
+
             new_balance = user["balance"] + pending_invoice["amount"]
+
+            # Atomic transaction
             async with await db.client.start_session() as s:
                 async with s.start_transaction():
                     await user_collection.update_one(
-                        {"username": username}, {"$set": {"balance": new_balance}}, session=s
+                        {"username": username},
+                        {"$set": {"balance": new_balance}},
+                        session=s,
                     )
                     await invoices_collection.update_one(
-                        {"_id": pending_invoice["_id"]}, {"$set": {"status": "archived"}}, session=s
+                        {"_id": pending_invoice["_id"]},
+                        {"$set": {"status": "archived"}},
+                        session=s,
                     )
             return {"message": "Invoice paid, balance updated"}
         else:
             return invoice_helper(pending_invoice)
 
-    print("No pending invoice found")
-    new_invoice_details = invoice_utils.create_invoice(amount=100)
-    if 'error' in new_invoice_details:
-        raise HTTPException(status_code=500, detail=new_invoice_details['error'])
-    
-    new_invoice = Invoice(username=username, status="pending", amount=new_invoice_details['amount'])
+    # Create New Invoice
+    new_invoice_details = invoice_utils.create_invoice(
+        amount=100
+    )  # Check the amount parameter, you can modify it as needed
+    if "error" in new_invoice_details:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=new_invoice_details["error"],
+        )
+
+    new_invoice = Invoice(
+        username=username,
+        pr=new_invoice_details.get("invoice", {}).get("pr"),
+        routes=new_invoice_details.get("invoice", {}).get("routes", []),
+        status="pending",
+        successAction=new_invoice_details.get("invoice", {}).get("successAction", {}),
+        verify=new_invoice_details.get("invoice", {}).get("verify"),
+        amount=new_invoice_details.get("amount"),
+    )
+
     insert_result = await invoices_collection.insert_one(new_invoice.dict())
     new_invoice_id = insert_result.inserted_id
     new_invoice_dict = new_invoice.dict()
-    new_invoice_dict['_id'] = new_invoice_id
+    new_invoice_dict["_id"] = new_invoice_id
 
     return invoice_helper(new_invoice_dict)
 
@@ -170,87 +202,15 @@ async def get_invoice(request: UsernameRequest):
 
 
 
-@app.put("/tx/")
-async def deduct_balance(transaction_request: TransactionRequest):
-    logger.debug("deduct_balance endpoint called")
-    logger.debug(f"Request: {transaction_request}")
-    username = transaction_request.username
-    user_collection = db.db.get_collection("users")
-    transactions_collection = db.db.get_collection("transactions")
-
-    user = await user_collection.find_one({"username": username})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    new_balance = user["balance"] + transaction_request.amount
-    # if new_balance < 0:
-    #     raise HTTPException(status_code=400, detail="Insufficient funds")
-
-    user["balance"] = new_balance
-    await user_collection.update_one({"username": username}, {"$set": {"balance": new_balance}})
-
-    transaction = Transaction(username=username, chat_id=transaction_request.chat_id, amount=transaction_request.amount)
-    await transactions_collection.insert_one(transaction.dict())
-
-    return {"username": username, "balance": new_balance}
-
-
-@app.get("/usage/")
-async def get_transactions(request: Request):
-    logger.debug("get_transactions endpoint called")
-    logger.debug(f"Request: {request}")
-    data = await request.json()
-    username = data['username']
-    transactions_collection = db.db.get_collection("transactions")
-    transactions = await transactions_collection.find({"username": username}).to_list(length=None)
-    if not transactions:
-        raise HTTPException(status_code=404, detail="No transactions found for this user")
-    transactions = [transaction_helper(transaction) for transaction in transactions]
-    return transactions
-
-
-@app.post("/invoices/")
-async def get_invoices(request: UsernameRequest):
-    username = request.username
-    invoices_collection = db.db.get_collection("invoices")
-    invoices = await invoices_collection.find({"username": username}).to_list(length=None)
-    if not invoices:
-        raise HTTPException(status_code=404, detail="No invoices found for this user")
-    
-    invoices = [invoice_helper(invoice) for invoice in invoices]
-    return invoices
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 ############################################################
-#TODO: ADMIN TESTING ENDPOINTS!
+#NOTE: ADMIN TESTING ENDPOINTS!
 ############################################################
-
-
-
-
-
-
 @app.get("/admin/users/", response_model=List[User])
 async def get_all_users():
     user_collection = db.db.get_collection("users")
     users = await user_collection.find().to_list(length=None)
     return users
-
 
 @app.post("/admin/users/")
 async def create_user(user_request: UserRequest):
@@ -262,7 +222,6 @@ async def create_user(user_request: UserRequest):
     await user_collection.insert_one(user.dict())
     return user
 
-
 @app.delete("/admin/users/")
 async def delete_user(request: UsernameRequest):
     username = request.username
@@ -273,46 +232,58 @@ async def delete_user(request: UsernameRequest):
     return {"message": f"User {username} deleted successfully"}
 
 
-
-
-
-
-
-
-@app.put("/admin/users/balance/increase")
-async def increase_balance(request: IncreaseBalanceRequest):
+@app.put("/admin/balance/")
+async def set_user_balance(request: BalanceRequest):
     username = request.username
-    amount = request.amount
+    new_balance = request.new_balance
     user_collection = db.db.get_collection("users")
     user = await user_collection.find_one({"username": username})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    new_balance = user["balance"] + amount
-
     await user_collection.update_one({"username": username}, {"$set": {"balance": new_balance}})
     
     return {"username": username, "new_balance": new_balance}
 
-@app.post("/admin/cleanup/pending/")
-async def cleanup_pending_invoices(request: UsernameRequest):
-    username = request.username
-    invoices_collection = db.db.get_collection("invoices")
-    result = await invoices_collection.delete_many({"username": username, "status": "pending"})
-    if result.deleted_count > 0:
-        return {"message": f"Deleted {result.deleted_count} pending invoices for user {username}"}
-    else:
-        raise HTTPException(status_code=404, detail="No pending invoices found for the user")
 
-@app.post("/admin/cleanup/archived/")
-async def cleanup_archived_invoices(request: UsernameRequest):
-    username = request.username
+
+
+@app.get("/admin/invoices/", response_model=List[dict])
+async def get_all_invoices():
     invoices_collection = db.db.get_collection("invoices")
-    result = await invoices_collection.delete_many({"username": username, "status": "archived"})
-    if result.deleted_count > 0:
-        return {"message": f"Deleted {result.deleted_count} archived invoices for user {username}"}
-    else:
-        raise HTTPException(status_code=404, detail="No archived invoices found for the user")
+    invoices = await invoices_collection.find().to_list(length=None)
+    invoices_with_id = [invoice_helper(invoice) for invoice in invoices]
+    logger.info(f"Invoices being returned: {invoices_with_id}")  # Add logging
+    return invoices_with_id
+
+
+@app.post("/admin/invoices/")
+async def create_invoice(invoice: Invoice):
+    invoices_collection = db.db.get_collection("invoices")
+    existing_invoice = await invoices_collection.find_one(
+        {"pr": invoice.pr}
+    )
+    if existing_invoice:
+        raise HTTPException(status_code=400, detail="Invoice already exists")
+    insert_result = await invoices_collection.insert_one(invoice.dict())
+    new_invoice_id = insert_result.inserted_id
+    new_invoice_dict = invoice.dict()
+    new_invoice_dict["_id"] = new_invoice_id
+    ret = invoice_helper(new_invoice_dict)
+    print("*"*50)
+    print(ret)
+    return ret
+
+
+@app.delete("/admin/invoice/{invoice_id}/")
+async def delete_invoice(invoice_id: str):
+    invoices_collection = db.db.get_collection("invoices")
+    if not ObjectId.is_valid(invoice_id):
+        raise HTTPException(status_code=400, detail="Invalid invoice ID")
+    result = await invoices_collection.delete_one({"_id": ObjectId(invoice_id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return {"message": f"Invoice {invoice_id} deleted successfully"}
 
 
 
