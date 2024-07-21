@@ -1,6 +1,25 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 
+
+
+
+
+class UserRequest(BaseModel):
+    username: str
+    balance: int
+
+class TransactionRequest(BaseModel):
+    username: str
+    chat_id: str
+    amount: int
+
+class BalanceRequest(BaseModel):
+    username: str
+    new_balance: int
+
+
+
 class User(BaseModel):
     username: str = Field(...)
     balance: float = Field(...)
@@ -36,6 +55,18 @@ class Transaction(BaseModel):
 class SuccessAction(BaseModel):
     message: str
     tag: str
+
+
+class TransactionRequest(BaseModel):
+    username: str
+    chat_id: str
+    amount: float
+
+class Transaction(BaseModel):
+    username: str = Field(...)
+    chat_id: str = Field(...)
+    amount: float = Field(...)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 class Invoice(BaseModel):
     username: str = Field(...)

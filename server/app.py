@@ -1,5 +1,6 @@
 import os
 import logging
+from datetime import datetime
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
 
@@ -43,24 +44,16 @@ from contextlib import asynccontextmanager
 from bson import ObjectId
 from typing import List
 
-from server.models import User, Transaction, Invoice, UsernameRequest
+from server.models import (
+    User, Transaction, Invoice, UsernameRequest, SuccessAction, TransactionRequest, BalanceRequest, UserRequest, Invoice
+)
+
 from server.database import db, connect_to_mongo, close_mongo_connection
 import server.invoice as invoice_utils
+import server.helpers as helpers
 
 
 
-class UserRequest(BaseModel):
-    username: str
-    balance: int
-
-class TransactionRequest(BaseModel):
-    username: str
-    chat_id: str
-    amount: int
-
-class BalanceRequest(BaseModel):
-    username: str
-    new_balance: int
 
 def transaction_helper(transaction) -> dict:
     return {
@@ -117,17 +110,28 @@ async def log_requests(request: Request, call_next):
 
 
 
+# @app.get("/balance/")
+# async def get_balance(request: Request):
+#     logger.debug("get_balance endpoint called")
+#     logger.debug(f"Request: {request}")
+#     data = await request.json()
+#     username = data['username']
+#     user_collection = db.db.get_collection("users")
+#     user = await user_collection.find_one({"username": username})
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+#     return {"username": username, "balance": user["balance"]}
+
+
 @app.get("/balance/")
-async def get_balance(request: Request):
+async def get_balance(username: str):
     logger.debug("get_balance endpoint called")
-    logger.debug(f"Request: {request}")
-    data = await request.json()
-    username = data['username']
-    user_collection = db.db.get_collection("users")
-    user = await user_collection.find_one({"username": username})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    logger.debug(f"Request: {username}")
+
+    user = await helpers.update_user_balance_for_paid_invoices(username)
     return {"username": username, "balance": user["balance"]}
+
+
 
 
 @app.get("/invoice/")
@@ -136,40 +140,10 @@ async def get_invoice(request: UsernameRequest):
     logger.debug(f"Request: {request}")
 
     username = request.username
-    invoices_collection = db.db.get_collection("invoices")
-    user_collection = db.db.get_collection("users")
+    result = await helpers.check_and_update_invoice_status(username)
 
-    # Fetch Pending Invoice
-    pending_invoice = await invoices_collection.find_one(
-        {"username": username, "status": "pending"}
-    )
-    if pending_invoice:
-        is_paid = invoice_utils.check_for_payment(pending_invoice)
-        if is_paid:
-            user = await user_collection.find_one({"username": username})
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-                )
-
-            new_balance = user["balance"] + pending_invoice["amount"]
-
-            # Atomic transaction
-            async with await db.client.start_session() as s:
-                async with s.start_transaction():
-                    await user_collection.update_one(
-                        {"username": username},
-                        {"$set": {"balance": new_balance}},
-                        session=s,
-                    )
-                    await invoices_collection.update_one(
-                        {"_id": pending_invoice["_id"]},
-                        {"$set": {"status": "archived"}},
-                        session=s,
-                    )
-            return {"message": "Invoice paid, balance updated"}
-        else:
-            return invoice_helper(pending_invoice)
+    if result:
+        return result
 
     # Create New Invoice
     new_invoice_details = invoice_utils.create_invoice(
@@ -191,12 +165,59 @@ async def get_invoice(request: UsernameRequest):
         amount=new_invoice_details.get("amount"),
     )
 
+    invoices_collection = db.db.get_collection("invoices")
     insert_result = await invoices_collection.insert_one(new_invoice.dict())
     new_invoice_id = insert_result.inserted_id
     new_invoice_dict = new_invoice.dict()
     new_invoice_dict["_id"] = new_invoice_id
 
     return invoice_helper(new_invoice_dict)
+
+
+
+
+
+
+@app.put("/tx/")
+async def deduct_balance(request: TransactionRequest):
+    logger.debug("deduct_balance endpoint called")
+    logger.debug(f"Request: {request}")
+
+    username = request.username
+    chat_id = request.chat_id
+    amount = request.amount
+
+    user_collection = db.db.get_collection("users")
+    user = await user_collection.find_one({"username": username})
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if user["balance"] + amount < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
+
+    new_balance = user["balance"] + amount  # `amount` is expected to be negative for deduction
+    await user_collection.update_one(
+        {"username": username},
+        {"$set": {"balance": new_balance}}
+    )
+
+    # Optional: log the transaction in a transactions collection
+    tx_collection = db.db.get_collection("transactions")
+    new_tx = Transaction(
+        username=username,
+        chat_id=chat_id,
+        amount=amount,
+        timestamp=datetime.utcnow()
+    )
+    await tx_collection.insert_one(new_tx.dict())
+
+    return {"username": username, "new_balance": new_balance}
+
+
+
+
+
 
 
 
