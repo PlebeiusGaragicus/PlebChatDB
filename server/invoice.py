@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 import time
 import json
 import requests
@@ -16,6 +19,8 @@ def check_for_payment(invoice):
     - True if the invoice is settled (paid).
     - False otherwise.
     """
+    logger.debug(f"Checking payment status for invoice: {invoice}")
+
     print(invoice)
     verify_url = invoice['verify']
 
@@ -67,6 +72,8 @@ def create_invoice(amount: int = 100, payee_address: str = "turkeybiscuit@getalb
     - Invoice details as a dictionary if successful.
     - Error message if the request fails.
     """
+    logger.info(f"Creating invoice for {amount} sats")
+
     # ln_address = "turkeybiscuit@getalby.com"
     url = "https://api.getalby.com/lnurl/generate-invoice"
     params = {
@@ -107,69 +114,69 @@ def create_invoice(amount: int = 100, payee_address: str = "turkeybiscuit@getalb
 
 
 
-def load_invoice_from_file(file_path='invoice.json'):
-    """
-    Load the stored invoice from a JSON file.
+# def load_invoice_from_file(file_path='invoice.json'):
+#     """
+#     Load the stored invoice from a JSON file.
 
-    Parameters:
-    - file_path: The path to the JSON file containing the stored invoice.
+#     Parameters:
+#     - file_path: The path to the JSON file containing the stored invoice.
 
-    Returns:
-    - The invoice details as a dictionary if the file is successfully read and parsed.
-    - None if the file does not exist or an error occurs during reading/parsing.
-    """
-    try:
-        with open(file_path, 'r') as file:
-            invoice = json.load(file)
-        return invoice
-    except FileNotFoundError:
-        print("Invoice file not found.")
-        return None
-    except json.JSONDecodeError:
-        print("Error decoding the JSON file.")
-        return None
+#     Returns:
+#     - The invoice details as a dictionary if the file is successfully read and parsed.
+#     - None if the file does not exist or an error occurs during reading/parsing.
+#     """
+#     try:
+#         with open(file_path, 'r') as file:
+#             invoice = json.load(file)
+#         return invoice
+#     except FileNotFoundError:
+#         print("Invoice file not found.")
+#         return None
+#     except json.JSONDecodeError:
+#         print("Error decoding the JSON file.")
+#         return None
     
 
 
 
 
 
-def return_stored_invoice():
-    invoice = load_invoice_from_file()
+# def return_stored_invoice():
+#     invoice = load_invoice_from_file()
 
-    if invoice is None:
-        return None
+#     if invoice is None:
+#         return None
 
-    pr = invoice['invoice']['pr']
-    invoice_date = decode(pr).date
-    print(f"Invoice created: {invoice_date}")
+#     pr = invoice['invoice']['pr']
+#     invoice_date = decode(pr).date
+#     print(f"Invoice created: {invoice_date}")
 
-    amount = decode(pr).amount_msat / 1000
-    tags = decode(pr).tags
+#     amount = decode(pr).amount_msat / 1000
+#     tags = decode(pr).tags
 
-    # Check for expiry tag
-    if not tags.has("expire_time"):  # Simplified tag reference
-        print("ERROR: Invoice is missing an expiry tag")
-        expiry = 3600  # Default to 1 hour
-    else:
-        expiry = tags.get("expire_time").data
-        print(f"Expiry: {expiry} seconds")
+#     # Check for expiry tag
+#     if not tags.has("expire_time"):  # Simplified tag reference
+#         print("ERROR: Invoice is missing an expiry tag")
+#         expiry = 3600  # Default to 1 hour
+#     else:
+#         expiry = tags.get("expire_time").data
+#         print(f"Expiry: {expiry} seconds")
 
-    # Current time in seconds since epoch
-    now = int(time.time())
-    print(f"Now: {now}")
-    # Invoice expiry time in seconds since epoch
-    invoice_expiry = invoice_date + expiry
-    # Time remaining in seconds
-    time_remaining = invoice_expiry - now
-    print(f"Time remaining: {time_remaining} seconds")
+#     # Current time in seconds since epoch
+#     now = int(time.time())
+#     print(f"Now: {now}")
+#     # Invoice expiry time in seconds since epoch
+#     invoice_expiry = invoice_date + expiry
+#     # Time remaining in seconds
+#     time_remaining = invoice_expiry - now
+#     print(f"Time remaining: {time_remaining} seconds")
 
-    if time_remaining < 60:  # Less than 60 seconds remaining
-        print("ERROR: Invoice has expired")
-        return None
+#     if time_remaining < 60:  # Less than 60 seconds remaining
+#         print("ERROR: Invoice has expired")
+#         return None
 
-    print(f"Amount: {amount} sats")
-    return invoice
+#     print(f"Amount: {amount} sats")
+#     return invoice
 
 
 

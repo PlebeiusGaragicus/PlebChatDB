@@ -1,5 +1,6 @@
-import streamlit as st
 import requests
+from pydantic import BaseModel
+import streamlit as st
 
 DATABASE_API_PORT = 5101
 DATABASE_API_URL = f"http://localhost:{DATABASE_API_PORT}"
@@ -17,7 +18,7 @@ st.title("Admin Dashboard")
 
 # Function to fetch all users
 def get_all_users():
-    response = requests.get(f"{DATABASE_API_URL}/users/")
+    response = requests.get(f"{DATABASE_API_URL}/admin/users/")
     if response.status_code == 200:
         return response.json()
     else:
@@ -29,11 +30,14 @@ st.header("Create User")
 username = st.text_input("Username")
 balance = st.number_input("Initial Balance", min_value=0)
 if st.button("Create User"):
-    response = requests.post(f"{DATABASE_API_URL}/users/", json={"username": username, "balance": balance})
+    response = requests.post(f"{DATABASE_API_URL}/admin/users/", json={"username": username, "balance": balance})
     if response.status_code == 200:
         st.success(f"User {username} created successfully!")
     else:
         st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+
+
+
 
 # Fetch all users and their balances
 st.header("All Users")
@@ -42,6 +46,19 @@ if users:
     user_dict = {user["username"]: user["balance"] for user in users}
     user_list = list(user_dict.keys())
     st.write(user_dict)
+
+
+class DeleteUserRequest(BaseModel):
+    username: str
+
+st.header("Delete User")
+del_username = st.selectbox("Select User to Delete", user_list)
+if st.button("Delete User"):
+    response = requests.delete(f"{DATABASE_API_URL}/admin/users/", json={"username": del_username})
+    if response.status_code == 200:
+        st.success(f"User {del_username} deleted successfully!")
+    else:
+        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
 
 # Get user balance using select box
 st.header("Get User Balance")
@@ -111,21 +128,3 @@ if users:
             st.error(f"Request failed: {e}")
         except ValueError:
             st.error("Failed to decode JSON response")
-
-# Clean up invoices
-st.header("Clean Up Invoices (TESTING ONLY)")
-if users:
-    cleanup_user = st.selectbox("Select User to Clean Up Invoices", user_list)
-    if st.button("Clean Up Invoices"):
-        response_pending = requests.post(
-            f"{DATABASE_API_URL}/admin/cleanup/pending/",
-            json={"username": cleanup_user}
-        )
-        response_archived = requests.post(
-            f"{DATABASE_API_URL}/admin/cleanup/archived/",
-            json={"username": cleanup_user}
-        )
-        if response_pending.status_code == 200 and response_archived.status_code == 200:
-            st.success(f"Cleaned up pending and archived invoices for user {cleanup_user}!")
-        else:
-            st.error("Failed to clean up invoices.")

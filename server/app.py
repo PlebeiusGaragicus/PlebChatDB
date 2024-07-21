@@ -1,3 +1,41 @@
+import os
+import logging
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+
+logging_config = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        },
+    },
+    "handlers": {
+        "default": {
+            "level": LOG_LEVEL,
+            "formatter": "standard",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "": {
+            "handlers": ["default"],
+            "level": LOG_LEVEL,
+            "propagate": True,
+        },
+    }
+}
+
+import logging.config
+
+# Load the logging configuration
+logging.config.dictConfig(logging_config)
+
+# Get the root logger
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,8 +80,10 @@ def invoice_helper(invoice) -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Connecting to MongoDB...")
     await connect_to_mongo()
     yield
+    logger.info("Closing MongoDB connection...")
     await close_mongo_connection()
 
 app = FastAPI(lifespan=lifespan)
@@ -61,8 +101,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"Request: {request.method} {request.url}")
+    response = await call_next(request)
+    logger.info(f"Response: {response.status_code}")
+    return response
+
+
+
 @app.get("/balance/")
 async def get_balance(request: Request):
+    logger.debug("get_balance endpoint called")
+    logger.debug(f"Request: {request}")
     data = await request.json()
     username = data['username']
     user_collection = db.db.get_collection("users")
@@ -73,6 +125,8 @@ async def get_balance(request: Request):
 
 @app.get("/invoice/")
 async def get_invoice(request: UsernameRequest):
+    logger.debug("get_invoice endpoint called")
+    logger.debug(f"Request: {request}")
     username = request.username
     invoices_collection = db.db.get_collection("invoices")
     user_collection = db.db.get_collection("users")
@@ -118,6 +172,8 @@ async def get_invoice(request: UsernameRequest):
 
 @app.put("/tx/")
 async def deduct_balance(transaction_request: TransactionRequest):
+    logger.debug("deduct_balance endpoint called")
+    logger.debug(f"Request: {transaction_request}")
     username = transaction_request.username
     user_collection = db.db.get_collection("users")
     transactions_collection = db.db.get_collection("transactions")
@@ -138,8 +194,11 @@ async def deduct_balance(transaction_request: TransactionRequest):
 
     return {"username": username, "balance": new_balance}
 
+
 @app.get("/usage/")
 async def get_transactions(request: Request):
+    logger.debug("get_transactions endpoint called")
+    logger.debug(f"Request: {request}")
     data = await request.json()
     username = data['username']
     transactions_collection = db.db.get_collection("transactions")
@@ -149,16 +208,51 @@ async def get_transactions(request: Request):
     transactions = [transaction_helper(transaction) for transaction in transactions]
     return transactions
 
+
+@app.post("/invoices/")
+async def get_invoices(request: UsernameRequest):
+    username = request.username
+    invoices_collection = db.db.get_collection("invoices")
+    invoices = await invoices_collection.find({"username": username}).to_list(length=None)
+    if not invoices:
+        raise HTTPException(status_code=404, detail="No invoices found for this user")
+    
+    invoices = [invoice_helper(invoice) for invoice in invoices]
+    return invoices
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ############################################################
-#TODO: TESTING ONLY!
+#TODO: ADMIN TESTING ENDPOINTS!
 ############################################################
-@app.get("/users/", response_model=List[User])
+
+
+
+
+
+
+@app.get("/admin/users/", response_model=List[User])
 async def get_all_users():
     user_collection = db.db.get_collection("users")
     users = await user_collection.find().to_list(length=None)
     return users
 
-@app.post("/users/")
+
+@app.post("/admin/users/")
 async def create_user(user_request: UserRequest):
     user_collection = db.db.get_collection("users")
     user = await user_collection.find_one({"username": user_request.username})
@@ -168,7 +262,24 @@ async def create_user(user_request: UserRequest):
     await user_collection.insert_one(user.dict())
     return user
 
-@app.put("/users/balance/increase")
+
+@app.delete("/admin/users/")
+async def delete_user(request: UsernameRequest):
+    username = request.username
+    user_collection = db.db.get_collection("users")
+    result = await user_collection.delete_one({"username": username})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": f"User {username} deleted successfully"}
+
+
+
+
+
+
+
+
+@app.put("/admin/users/balance/increase")
 async def increase_balance(request: IncreaseBalanceRequest):
     username = request.username
     amount = request.amount
@@ -203,18 +314,6 @@ async def cleanup_archived_invoices(request: UsernameRequest):
     else:
         raise HTTPException(status_code=404, detail="No archived invoices found for the user")
 
-
-
-@app.post("/invoices/")
-async def get_invoices(request: UsernameRequest):
-    username = request.username
-    invoices_collection = db.db.get_collection("invoices")
-    invoices = await invoices_collection.find({"username": username}).to_list(length=None)
-    if not invoices:
-        raise HTTPException(status_code=404, detail="No invoices found for this user")
-    
-    invoices = [invoice_helper(invoice) for invoice in invoices]
-    return invoices
 
 
 
