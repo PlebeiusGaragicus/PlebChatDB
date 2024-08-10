@@ -4,3 +4,6 @@ motor
 pydantic
 pymongo
 requests
+bolt11
+streamlit
+python-dotenv
